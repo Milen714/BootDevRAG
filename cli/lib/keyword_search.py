@@ -1,3 +1,5 @@
+import math
+
 from lib.inverted_index import InvertedIndex
 
 from .search_utils import DEFAULT_SEARCH_LIMIT, load_movies, tokenize_text, tokenize_term
@@ -58,4 +60,31 @@ def tf_command(doc_id: int, term: str):
     except FileNotFoundError as e:
         print(f"Error: {e}")
         return 0
-    
+
+def idf_command(term: str):
+    try:
+        index = InvertedIndex()
+        index.load()
+        tokenized_term = tokenize_term(term)
+        matching_docs = index.get_documents(tokenized_term)
+        total_docs = len(index.docmap)
+        idf_value = math.log((total_docs + 1) / (len(matching_docs) + 1))
+        print(f"Inverse document frequency of '{term}': {idf_value:.2f}")
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        return 0.0
+
+def tfidf_command(doc_id: int, term: str):
+    try:
+        index = InvertedIndex()
+        index.load()
+        tokenized_term = tokenize_term(term)
+        tf_value = index.get_term_frequency(doc_id, tokenized_term)
+        matching_docs = index.get_documents(tokenized_term)
+        total_docs = len(index.docmap)
+        idf_value = math.log((total_docs + 1) / (len(matching_docs) + 1))
+        tfidf_value = tf_value * idf_value
+        print(f"TF-IDF score of '{term}' in document '{doc_id}': {tfidf_value:.2f}")
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        return 0.0
