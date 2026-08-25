@@ -46,3 +46,9 @@ def tokenize_text(text: str) -> list[str]:
 
 def is_stopword(token: str) -> bool:
     return token in STOPWORDS
+
+def tokenize_term(term: str) -> str:
+    tokens = tokenize_text(term)
+    if len(tokens) != 1:
+        raise ValueError(f"Expected a single token for term '{term}', but got {len(tokens)} tokens.")
+    return tokens[0]

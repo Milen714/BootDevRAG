@@ -1,6 +1,6 @@
 from lib.inverted_index import InvertedIndex
 
-from .search_utils import DEFAULT_SEARCH_LIMIT, load_movies, tokenize_text
+from .search_utils import DEFAULT_SEARCH_LIMIT, load_movies, tokenize_text, tokenize_term
 import string
 
 
@@ -47,4 +47,15 @@ def build_command() -> None:
 
     # docs = index.get_documents("merida")
     # print(f"First document for token 'merida' = {docs[0]}")
+
+def tf_command(doc_id: int, term: str):
+    try:
+        index = InvertedIndex()
+        index.load()
+        tokenized_term = tokenize_term(term)
+        frequency = index.get_term_frequency(doc_id, tokenized_term)
+        print(frequency)
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        return 0
     
