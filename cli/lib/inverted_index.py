@@ -1,3 +1,5 @@
+import math
+
 from .search_utils import tokenize_text, load_movies
 import os 
 import pickle
@@ -58,8 +60,21 @@ class InvertedIndex:
         with open("cache/term_frequencies.pkl", "rb") as f:
             self.term_frequencies = pickle.load(f)
 
-    def get_term_frequency(self, doc_id, term):
+    def get_term_frequency(self, doc_id, term) -> int:
         if doc_id in self.term_frequencies:
             return self.term_frequencies.get(doc_id, Counter())[term]
         return 0
-        
+
+    def get_bm25_idf(self, term: str) -> float:
+        """
+        Calculate the Inverse Document Frequency (IDF) for a given term using the BM25 formula.
+        IDF = log((N - n + 0.5) / (n + 0.5) + 1)
+        where:
+            N = total number of documents
+            n = number of documents containing the term
+        """
+        N = len(self.docmap)
+
+        df = len(self.index.get(term, set()))
+        IDF = math.log((N - df + 0.5) / (df + 0.5) + 1)
+        return IDF

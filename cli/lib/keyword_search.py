@@ -88,3 +88,15 @@ def tfidf_command(doc_id: int, term: str):
     except FileNotFoundError as e:
         print(f"Error: {e}")
         return 0.0
+
+def bm25_idf_command(term: str) -> float:
+    try:
+        index = InvertedIndex()
+        index.load()
+        tokenized_term = tokenize_term(term)
+        idf_value = index.get_bm25_idf(tokenized_term)
+            
+        return idf_value
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        return 0.0
