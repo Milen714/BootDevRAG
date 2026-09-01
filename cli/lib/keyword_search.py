@@ -2,7 +2,7 @@ import math
 
 from lib.inverted_index import InvertedIndex
 
-from .search_utils import DEFAULT_SEARCH_LIMIT, load_movies, tokenize_text, tokenize_term
+from .search_utils import BM25_B, DEFAULT_SEARCH_LIMIT, load_movies, tokenize_text, tokenize_term, BM25_K1
 import string
 
 
@@ -100,3 +100,26 @@ def bm25_idf_command(term: str) -> float:
     except FileNotFoundError as e:
         print(f"Error: {e}")
         return 0.0
+
+def bm25_tf_command(doc_id: int, term: str, k1: float = BM25_K1, b: float = BM25_B) -> float:
+    try:
+        index = InvertedIndex()
+        index.load()
+        tokenized_term = tokenize_term(term)
+        tf_value = index.get_bm25_tf(doc_id, tokenized_term, k1=k1, b=b)
+        return tf_value
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        return 0.0
+
+def bm25search_command(query: str, limit: int = DEFAULT_SEARCH_LIMIT):
+    try:
+        index = InvertedIndex()
+        index.load()
+        res = index.bm25_search(query, limit)
+        for doc, score in res:
+            print(f"({doc['id']}) {doc['title']} - Score: {score:.2f}")
+        
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        return []
