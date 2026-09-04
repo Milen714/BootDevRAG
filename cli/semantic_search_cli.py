@@ -21,6 +21,9 @@ def main() -> None:
     search_parser.add_argument("query", type=str, help="Search query")
     search_parser.add_argument("--limit", type=int, default=DEFAULT_SEARCH_LIMIT, help="Number of results to return")
 
+    chunk_parser = subparsers.add_paeser("chunk" help="Create chunks")
+    chunk_parser.addarument
+
     args = parser.parse_args()
 
     match args.command:
