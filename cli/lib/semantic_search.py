@@ -1,7 +1,9 @@
-from typing import TypedDict
+from typing import Any, TypedDict
 
+from numpy.typing import NDArray
 from sentence_transformers import SentenceTransformer
-from .search_utils import CACHE_DIR,EMBEDDINGS_PATH , load_movies, DEFAULT_SEARCH_LIMIT
+import re
+from .search_utils import CACHE_DIR, CHUNK_OVERLAP, EMBEDDINGS_PATH, MODEL_NAME, load_movies, DEFAULT_SEARCH_LIMIT, CHUNK_SIZE, MAX_CHUNK_SIZE
 import numpy as np
 import os
 
@@ -12,21 +14,36 @@ class SemanticSearchResult(TypedDict):
     title: str
     description: str
 
-class SemanticSearch:
-    def __init__(self):
-        self.model = SentenceTransformer('all-MiniLM-L6-v2')
-        self.embeddings = None
-        self.documents = None
-        self.document_map = {}
+class ChunkMetadata(TypedDict):
+    movie_idx: int
+    chunk_idx: int
+    total_chunks: int
 
-    def generate_embedding(self, text):
+
+class ChunkScore(TypedDict):
+    movie_idx: int
+    chunk_idx: int
+    score: float
+
+
+EmbeddingArray = NDArray[Any]
+
+
+class SemanticSearch:
+    def __init__(self, model_name: str = MODEL_NAME) -> None:
+        self.model = SentenceTransformer(model_name)
+        self.embeddings: EmbeddingArray | None = None
+        self.documents: list[dict[str, Any]] | None = None
+        self.document_map: dict[int, dict[str, Any]] = {}
+
+    def generate_embedding(self, text: str) -> EmbeddingArray:
         if len(text) == 0 or text == " ":
             raise ValueError("Input text cannot be empty or just whitespace.")
         input = [text]
 
         return self.model.encode(input)[0]
 
-    def build_embeddings(self, documents) -> np.ndarray:
+    def build_embeddings(self, documents: list[dict[str, Any]]) -> EmbeddingArray:
         if not documents:
             raise ValueError("Document list cannot be empty.")
         
@@ -43,7 +60,7 @@ class SemanticSearch:
         np.save(EMBEDDINGS_PATH, self.embeddings)
         return self.embeddings
 
-    def load_or_create_embeddings(self, documents):
+    def load_or_create_embeddings(self, documents: list[dict[str, Any]]) -> EmbeddingArray:
         try:
             self.documents = documents
             self.document_map = {doc["id"]: doc for doc in documents}
@@ -76,7 +93,7 @@ class SemanticSearch:
 
         query_embedding = self.generate_embedding(query)
 
-        similarities: list[tuple[float, Movie]] = []
+        similarities: list[tuple[float, dict[str, Any]]] = []
         for i, doc_embedding in enumerate(self.embeddings):
             similarity = cosine_similarity(query_embedding, doc_embedding)
             similarities.append((similarity, self.documents[i]))
@@ -132,7 +149,7 @@ def embed_query_text(query):
     print(f"First 3 dimensions: {embedding[:3]}")
     print(f"Shape: {embedding.shape}")
 
-def cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
+def cosine_similarity(vec1: EmbeddingArray, vec2: EmbeddingArray) -> float:
     dot_product = np.dot(vec1, vec2)
     norm1 = np.linalg.norm(vec1)
     norm2 = np.linalg.norm(vec2)
@@ -141,3 +158,92 @@ def cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
         return 0.0
 
     return dot_product / (norm1 * norm2)
+
+def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
+    """
+    Splits the input text into chunks of specified size.
+
+    Args:
+        text (str): The input text to be chunked.
+        chunk_size (int): The maximum size of each chunk.
+        overlap (int): The number of characters to overlap between chunks.
+
+    Returns:
+        list[str]: A list of text chunks.
+    """
+    if not text:
+        raise ValueError("Input text cannot be empty.")
+    
+    if chunk_size <= 0:
+        raise ValueError("Chunk size must be a positive integer.")
+
+    split_text = text.split()
+
+    chunks = __chunk_text_impl(chunk_size, overlap, split_text)
+            
+    print(f"Chunking {len(text)} characters")
+    for i, chunk in enumerate(chunks):
+        print(f"{i + 1}. {chunk}\n")
+
+    return chunks
+
+
+def __chunk_text_impl(chunk_size, overlap, split_text)-> list[str]:
+    chunks = []
+    step = chunk_size - overlap
+    if step <= 0:
+        raise ValueError("Overlap must be smaller than chunk size.")
+
+    for i in range(0, len(split_text), step):
+        if i > 0 and len(split_text) - i <= overlap:
+            break
+        chunk = split_text[i:i + chunk_size]
+        if chunk:
+            chunks.append(" ".join(chunk.strip() for chunk in chunk if chunk.strip()))
+    return chunks
+
+
+def semantic_chunk_text(text: str, max_chunk_size: int = MAX_CHUNK_SIZE, overlap: int = CHUNK_OVERLAP, verbose: bool = True) -> list[str]:
+    """
+    Splits the input text into semantic chunks of specified size.
+
+    Args:
+        text (str): The input text to be chunked.
+        max_chunk_size (int): The maximum size of each chunk.
+        overlap (int): The number of characters to overlap between chunks.
+
+    Returns:
+        list[str]: A list of semantic text chunks.
+    """
+    text = text.strip()
+
+    if not text:
+        return []
+
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+
+    if len(sentences) == 1 and not text.endswith((".", "!", "?")):
+        sentences = [text]
+
+    chunks: list[str] = []
+    i = 0
+    n_sentences = len(sentences)
+
+    while i < n_sentences:
+        chunk_sentences = sentences[i : i + max_chunk_size]
+        if chunks and len(chunk_sentences) <= overlap:
+            break
+
+        cleaned_sentences = []
+        for chunk_sentence in chunk_sentences:
+            chunk_sentence = chunk_sentence.strip()
+            if chunk_sentence:
+                cleaned_sentences.append(chunk_sentence)
+        if not cleaned_sentences:
+            i += max_chunk_size - overlap
+            continue
+        chunk = " ".join(cleaned_sentences)
+        chunks.append(chunk)
+        i += max_chunk_size - overlap
+
+    return chunks
