@@ -1,6 +1,6 @@
 import math
 
-from .search_utils import tokenize_text, load_movies, BM25_K1, CACHE_DIR, BM25_B
+from .search_utils import format_search_result, tokenize_text, load_movies, BM25_K1, CACHE_DIR, BM25_B, DEFAULT_SEARCH_LIMIT, SearchResult
 import os 
 import pickle
 from collections import Counter
@@ -11,6 +11,9 @@ class InvertedIndex:
         self.docmap: dict[int, dict] = {}
         self.term_frequencies: dict[int, Counter] = {}
         self.doc_lengths: dict[int, int] = {}
+        self.index_path = os.path.join(CACHE_DIR, "index.pkl")
+        self.docmap_path = os.path.join(CACHE_DIR, "docmap.pkl")
+        self.tf_path = os.path.join(CACHE_DIR, "term_frequencies.pkl")
         self.doc_lengths_path = os.path.join(CACHE_DIR, "doc_lengths.pkl")
 
     def __add_document(self, doc_id, text):
@@ -39,31 +42,31 @@ class InvertedIndex:
             self.__add_document(doc_id, combined_text)
 
     def save(self):
-        os.makedirs("cache", exist_ok=True)
+        os.makedirs(CACHE_DIR, exist_ok=True)
 
-        with open("cache/index.pkl", "wb") as f:
+        with open(self.index_path, "wb") as f:
             pickle.dump(self.index, f)
 
-        with open("cache/docmap.pkl", "wb") as f:
+        with open(self.docmap_path, "wb") as f:
             pickle.dump(self.docmap, f)
 
-        with open("cache/term_frequencies.pkl", "wb") as f:
+        with open(self.tf_path, "wb") as f:
             pickle.dump(self.term_frequencies, f)
 
         with open(self.doc_lengths_path, "wb") as f:
             pickle.dump(self.doc_lengths, f)
 
     def load(self):
-        if not os.path.exists("cache/index.pkl") or not os.path.exists("cache/docmap.pkl"):
+        if not os.path.exists(self.index_path) or not os.path.exists(self.docmap_path) or not os.path.exists(self.tf_path) or not os.path.exists(self.doc_lengths_path):
             raise FileNotFoundError("Inverted index files not found. Please build the index first.")
         
-        with open("cache/index.pkl", "rb") as f:
+        with open(self.index_path, "rb") as f:
             self.index = pickle.load(f)
 
-        with open("cache/docmap.pkl", "rb") as f:
+        with open(self.docmap_path, "rb") as f:
             self.docmap = pickle.load(f)
 
-        with open("cache/term_frequencies.pkl", "rb") as f:
+        with open(self.tf_path, "rb") as f:
             self.term_frequencies = pickle.load(f)
 
         with open(self.doc_lengths_path, "rb") as f:
@@ -124,18 +127,30 @@ class InvertedIndex:
         tf = self.get_bm25_tf(doc_id, term)
         idf = self.get_bm25_idf(term)
         return idf * tf
-    def bm25_search(self, query, limit) -> list[tuple[dict, float]]:
-        """
-        Perform a BM25 search for a given query and return the top results.
-        """
-        tokens = tokenize_text(query)
-        scores = {}
-        for token in tokens:
-            for doc_id in self.get_documents(token):
-                if doc_id not in scores:
-                    scores[doc_id] = 0.0
-                scores[doc_id] += self.bm25(doc_id, token)
-        
-        # Sort documents by score in descending order and limit the results
-        sorted_docs = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:limit]
-        return [(self.docmap[doc_id], score) for doc_id, score in sorted_docs]
+    
+    def bm25_search(
+        self, query: str, limit: int = DEFAULT_SEARCH_LIMIT
+    ) -> list[SearchResult]:
+        query_tokens = tokenize_text(query)
+
+        scores: dict[int, float] = {}
+        for doc_id in self.docmap:
+            score = 0.0
+            for token in query_tokens:
+                score += self.bm25(doc_id, token)
+            scores[doc_id] = score
+
+        sorted_docs = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+        results: list[SearchResult] = []
+        for doc_id, score in sorted_docs[:limit]:
+            doc = self.docmap[doc_id]
+            formatted_result = format_search_result(
+                doc_id=doc["id"],
+                title=doc["title"],
+                document=doc["description"],
+                score=score,
+            )
+            results.append(formatted_result)
+
+        return results

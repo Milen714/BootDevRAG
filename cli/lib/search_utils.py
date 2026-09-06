@@ -12,9 +12,11 @@ class SearchResult(TypedDict):
     metadata: dict[str, Any]    
 
 MODEL_NAME = "all-MiniLM-L6-v2"
-DEFAULT_SEARCH_LIMIT = 5
+DEFAULT_SEARCH_LIMIT = 5 * 500
 SCORE_PRECISION = 4
 DOCUMENT_PREVIEW_LENGTH = 100
+DEFAULT_ALPHA = 0.5
+K_VALUE = 60
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 DATA_PATH = os.path.join(PROJECT_ROOT, "data", "movies.json")
@@ -37,13 +39,27 @@ def load_movies() -> list[dict]:
     return data["movies"]
 
 
-def format_search_result(doc_id, title, document, score, metadata=None) -> dict:
+def format_search_result(
+    doc_id: int, title: str, document: str, score: float, **metadata: Any
+) -> SearchResult:
+    """Create standardized search result
+
+    Args:
+        doc_id: Document ID
+        title: Document title
+        document: Display text (usually short description)
+        score: Relevance/similarity score
+        **metadata: Additional metadata to include
+
+    Returns:
+        Dictionary representation of search result
+    """
     return {
         "id": doc_id,
         "title": title,
-        "document": document[:100],
+        "document": document,
         "score": round(score, SCORE_PRECISION),
-        "metadata": metadata or {},
+        "metadata": metadata if metadata else {},
     }
 
 

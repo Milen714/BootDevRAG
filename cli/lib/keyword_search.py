@@ -7,16 +7,6 @@ import string
 
 
 def search_command(query: str, limit: int = DEFAULT_SEARCH_LIMIT) -> list[dict]:
-    # movies = load_movies()
-    # results = []
-    # query_tokens = tokenize_text(query)
-    # for movie in movies:
-    #     movie_tokens = tokenize_text(movie["title"])
-    #     if token_appears_in_title(query_tokens, movie_tokens):
-    #         results.append(movie)
-    #         if len(results) >= limit:
-    #             break
-    # return results
     results = []
     try:
         index = InvertedIndex()
