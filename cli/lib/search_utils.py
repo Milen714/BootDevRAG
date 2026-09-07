@@ -12,11 +12,13 @@ class SearchResult(TypedDict):
     metadata: dict[str, Any]    
 
 MODEL_NAME = "all-MiniLM-L6-v2"
-DEFAULT_SEARCH_LIMIT = 5 * 500
+DEFAULT_SEARCH_LIMIT = 5
 SCORE_PRECISION = 4
 DOCUMENT_PREVIEW_LENGTH = 100
 DEFAULT_ALPHA = 0.5
 K_VALUE = 60
+
+SEARCH_LIMIT_MULTIPLIER = int(5)
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 DATA_PATH = os.path.join(PROJECT_ROOT, "data", "movies.json")

@@ -1,8 +1,7 @@
 import os
-from typing import TypedDict
+from typing import Literal, TypedDict
 
-from lib.search_utils import DEFAULT_SEARCH_LIMIT, DOCUMENT_PREVIEW_LENGTH, DEFAULT_ALPHA, K_VALUE, SearchResult, load_movies, format_search_result
-
+from lib.search_utils import DEFAULT_SEARCH_LIMIT, DOCUMENT_PREVIEW_LENGTH, DEFAULT_ALPHA, K_VALUE, SEARCH_LIMIT_MULTIPLIER, SearchResult, load_movies, format_search_result
 from .keyword_search import InvertedIndex
 from .chunked_semantic_search import ChunkedSemanticSearch
 
@@ -23,8 +22,12 @@ class RRFScoreData(TypedDict):
 
 class RRFSearchCommandResult(TypedDict):
     original_query: str
+    enhanced_query: str | None
+    enhance_method: Literal["spell", "expand", "rewrite"] | None
     query: str
     k: int
+    rerank_method: Literal["individual", "batch"] | None
+    reranked: bool
     results: list[SearchResult]
 
 
@@ -218,10 +221,42 @@ def weighted_search_command(
         "results": results,
     }
 def rrf_search_command(
-    query: str, k: int = K_VALUE, limit: int = DEFAULT_SEARCH_LIMIT
+    query: str, k: int = K_VALUE, limit: int = DEFAULT_SEARCH_LIMIT,
+    enhance: Literal["spell", "expand", "rewrite"] | None = None,
+    rerank_method: Literal["individual", "batch", "cross_encoder"] | None = None,
 ) -> RRFSearchCommandResult:
     movies = load_movies()
     searcher = HybridSearch(movies)
+    original_query = query
+    enhanced_query = None
 
-    results = searcher.rrf_search(query, k, limit)
-    return {"query": query, "k": k, "results": results}
+    if enhance:
+        from .enhance_query import enhance_query
+
+        enhanced_query = enhance_query(query, enhance)
+        query = enhanced_query
+
+    search_limit = (
+        limit * SEARCH_LIMIT_MULTIPLIER
+        if rerank_method
+        else limit
+    )
+
+    results = searcher.rrf_search(query, k, search_limit)
+
+    reranked = False
+    if rerank_method:
+        from .rerank import rerank
+
+        results = rerank(query, results, method=rerank_method, limit=limit)
+        reranked = True
+    return {
+        "query": query,
+        "k": k,
+        "results": results,
+        "enhance_method": enhance,
+        "enhanced_query": enhanced_query,
+        "rerank_method": rerank_method,
+        "reranked": reranked,
+        "original_query": original_query,
+        }
