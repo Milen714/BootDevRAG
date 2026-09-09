@@ -1,7 +1,7 @@
 import argparse
 import time
 
-from lib.search_utils import DEFAULT_SEARCH_LIMIT
+from lib.config import DEFAULT_SEARCH_LIMIT, DOCUMENT_PREVIEW_LENGTH
 from lib.hybrid_search import normalize_scores, rrf_search_command, weighted_search_command
 
 
@@ -80,7 +80,12 @@ def main() -> None:
                     print(
                         f"   BM25: {metadata['bm25_score']:.3f}, Semantic: {metadata['semantic_score']:.3f}"
                     )
-                print(f"   {res['document'][:100]}...")
+                metadata = res.get("metadata", {})
+                print(f"   Chunk: {res['id']} (parent: {metadata.get('parent_id', 'unknown')})")
+                print(f"   Source: {metadata.get('publisher', '')} {metadata.get('date', '')}".rstrip())
+                if metadata.get("url"):
+                    print(f"   URL: {metadata['url']}")
+                print(f"   {res['document'][:DOCUMENT_PREVIEW_LENGTH]}...")
                 print()
         case "rrf-search":
             result = rrf_search_command(
@@ -111,6 +116,8 @@ def main() -> None:
                     print(f"   Re-rank Score: {res.get('individual_score', 0):.3f}/10")
                 if "batch_rank" in res:
                     print(f"   Re-rank Rank: {res.get('batch_rank', 0)}")
+                if "crossencoder_score" in res:
+                    print(f"   Cross-encoder Score: {float(res['crossencoder_score']):.3f}")
                 print(f"   RRF Score: {res.get('score', 0):.3f}")
                 metadata = res.get("metadata", {})
                 ranks = []
@@ -120,7 +127,13 @@ def main() -> None:
                     ranks.append(f"Semantic Rank: {metadata['semantic_rank']}")
                 if ranks:
                     print(f"   {', '.join(ranks)}")
-                print(f"   {res['document'][:100]}...")
+                print(f"   Chunk: {res['id']} (parent: {metadata.get('parent_id', 'unknown')})")
+                print(f"   Source: {metadata.get('publisher', '')} {metadata.get('date', '')}".rstrip())
+                if metadata.get("url"):
+                    print(f"   URL: {metadata['url']}")
+                if metadata.get("citation"):
+                    print(f"   Citation: {metadata['citation']}")
+                print(f"   {res['document']}...")
                 print()
         case _:
             parser.print_help()

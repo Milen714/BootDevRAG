@@ -2,7 +2,8 @@ import math
 
 from lib.inverted_index import InvertedIndex
 
-from .search_utils import BM25_B, DEFAULT_SEARCH_LIMIT, load_movies, tokenize_text, tokenize_term, BM25_K1
+from .config import BM25_B, BM25_K1, DEFAULT_SEARCH_LIMIT
+from .search_utils import load_chunks, tokenize_text, tokenize_term
 import string
 
 
@@ -15,32 +16,32 @@ def search_command(query: str, limit: int = DEFAULT_SEARCH_LIMIT) -> list[dict]:
         for token in query_tokens:
             doc_ids = index.get_documents(token)
             for doc_id in doc_ids:
-                movie = index.docmap[doc_id]
-                if movie not in results:
-                    results.append(movie)
+                chunk = index.docmap[doc_id]
+                if chunk not in results:
+                    results.append(chunk)
                     if len(results) >= limit:
                         return results
     except FileNotFoundError as e:
         print(f"Error: {e}")
     return results
 
-def token_appears_in_title(query_tokens: list[str], movie_tokens: list[str]) -> bool:
+def token_appears_in_title(query_tokens: list[str], title_tokens: list[str]) -> bool:
     for query_token in query_tokens:
-        for movie_token in movie_tokens:
-            if query_token in movie_token:
+        for title_token in title_tokens:
+            if query_token in title_token:
                 return True
     return False
 
 def build_command() -> None:
     index = InvertedIndex()
 
-    index.build()
+    index.build(load_chunks())
     index.save()
 
     # docs = index.get_documents("merida")
     # print(f"First document for token 'merida' = {docs[0]}")
 
-def tf_command(doc_id: int, term: str):
+def tf_command(doc_id: str, term: str):
     try:
         index = InvertedIndex()
         index.load()
@@ -64,7 +65,7 @@ def idf_command(term: str):
         print(f"Error: {e}")
         return 0.0
 
-def tfidf_command(doc_id: int, term: str):
+def tfidf_command(doc_id: str, term: str):
     try:
         index = InvertedIndex()
         index.load()
@@ -91,7 +92,7 @@ def bm25_idf_command(term: str) -> float:
         print(f"Error: {e}")
         return 0.0
 
-def bm25_tf_command(doc_id: int, term: str, k1: float = BM25_K1, b: float = BM25_B) -> float:
+def bm25_tf_command(doc_id: str, term: str, k1: float = BM25_K1, b: float = BM25_B) -> float:
     try:
         index = InvertedIndex()
         index.load()
@@ -107,8 +108,8 @@ def bm25search_command(query: str, limit: int = DEFAULT_SEARCH_LIMIT):
         index = InvertedIndex()
         index.load()
         res = index.bm25_search(query, limit)
-        for doc, score in res:
-            print(f"({doc['id']}) {doc['title']} - Score: {score:.2f}")
+        for result in res:
+            print(f"({result['id']}) {result['title']} - Score: {result['score']:.2f}")
         
     except FileNotFoundError as e:
         print(f"Error: {e}")

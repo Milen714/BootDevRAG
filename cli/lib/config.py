@@ -1,0 +1,59 @@
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+DATA_DIR = PROJECT_ROOT / "data"
+DATASET_PATH = DATA_DIR / "20260331_dataset2.xlsx"
+RAW_DATA_DIR = DATA_DIR / "raw"
+PROCESSED_DATA_DIR = DATA_DIR / "processed"
+PROCESSED_DOCUMENTS_PATH = PROCESSED_DATA_DIR / "documents.jsonl"
+CHUNKS_PATH = PROCESSED_DATA_DIR / "chunks.jsonl"
+DOWNLOAD_REPORT_PATH = PROCESSED_DATA_DIR / "download_report.json"
+
+CACHE_DIR = PROJECT_ROOT / "cache"
+CHUNKED_EMBEDDINGS_PATH = CACHE_DIR / "chunk_embeddings.npy"
+CHUNK_METADATA_PATH = CACHE_DIR / "chunk_metadata.jsonl"
+EMBEDDING_MANIFEST_PATH = CACHE_DIR / "embedding_manifest.json"
+BM25_CACHE_DIR = CACHE_DIR / "bm25"
+BM25_INDEX_PATH = BM25_CACHE_DIR / "index.pkl"
+BM25_DOCMAP_PATH = BM25_CACHE_DIR / "docmap.pkl"
+BM25_TERM_FREQUENCIES_PATH = BM25_CACHE_DIR / "term_frequencies.pkl"
+BM25_DOC_LENGTHS_PATH = BM25_CACHE_DIR / "doc_lengths.pkl"
+BM25_MANIFEST_PATH = BM25_CACHE_DIR / "manifest.json"
+
+STOPWORDS_PATH = DATA_DIR / "stopwords.txt"
+EXCEL_SHEET_NAME = "Sheet1"
+REQUIRED_DATASET_COLUMNS = (
+    "id",
+    "title",
+    "url",
+    "publisher",
+    "date",
+    "theme",
+    "keywords",
+    "bronvermelding",
+)
+
+MODEL_NAME = "all-MiniLM-L6-v2"
+CROSS_ENCODER_MODEL_NAME = "cross-encoder/ms-marco-TinyBERT-L2-v2"
+EMBEDDING_BATCH_SIZE = 32
+DEFAULT_SEARCH_LIMIT = 5
+SCORE_PRECISION = 4
+DOCUMENT_PREVIEW_LENGTH = 300
+DEFAULT_ALPHA = 0.5
+K_VALUE = 60
+SEARCH_LIMIT_MULTIPLIER = 5
+MIN_RETRIEVAL_CANDIDATES = 25
+MAX_CHUNKS_PER_PARENT = 2
+
+CHUNK_SIZE = 400
+CHUNK_OVERLAP = 80
+MIN_USEFUL_TEXT_CHARS = 500
+
+BM25_K1 = 1.5
+BM25_B = 0.75
+
+REQUEST_TIMEOUT_SECONDS = 120
+DOWNLOAD_DELAY_SECONDS = 0.5
+USER_AGENT = "BootDevRAG/1.0 (+document retrieval project)"

@@ -2,6 +2,7 @@ import json
 from time import sleep
 from typing import Literal, NotRequired
 
+from .config import CROSS_ENCODER_MODEL_NAME
 from .search_utils import SearchResult
 from .llm_client import client, model, provider
 from sentence_transformers import CrossEncoder
@@ -18,10 +19,10 @@ def llm_rerank_individual(
     scored_docs: list[RerankedSearchResult] = []
 
     for index, doc in enumerate(documents):
-        prompt = f"""Rate how well this movie matches the search query.
+        prompt = f"""Rate how well this source passage matches the search query.
 
         Query: "{query}"
-        Movie: {doc.get("title", "")} - {doc.get("document", "")}
+        Source passage: {doc.get("title", "")} - {doc.get("document", "")}
 
         Consider:
         - Direct relevance to query
@@ -29,8 +30,8 @@ def llm_rerank_individual(
         - Content appropriateness
 
         Identify every important constraint in the query before scoring.
-        Score 9-10 only when the movie directly satisfies nearly all constraints.
-        Penalize movies that match only incidental words or a single constraint.
+        Score 9-10 only when the passage directly satisfies nearly all constraints.
+        Penalize passages that match only incidental words or a single constraint.
 
         Rate 0-10 (10 = perfect match).
         Output ONLY the number in your response, no other text or explanation.
@@ -44,7 +45,7 @@ def llm_rerank_individual(
                     messages=[
                         {
                             "role": "system",
-                            "content": "You are a strict movie search relevance evaluator.",
+                            "content": "You are a strict source-passage relevance evaluator.",
                         },
                         {"role": "user", "content": prompt},
                     ],
@@ -78,21 +79,21 @@ def llm_rerank_batch(
         f"ID: {doc['id']}\nTitle: {doc['title']}\nDescription: {doc['document'][:1000]}"
         for doc in documents
     )
-    prompt = f"""Rank the movies listed below by relevance to the following search query.
+    prompt = f"""Rank the source passages listed below by relevance to the following search query.
 
 Query: "{query}"
 
-Movies:
+Source passages:
 {doc_list_str}
 
-Return the movie IDs in order of relevance, best match first.
+Return the passage IDs in order of relevance, best match first.
 
-Your response must be a raw JSON array of integers.
+Your response must be a raw JSON array of strings.
 Do not wrap the JSON in Markdown. Do not use a ```json code block.
 Do not include any explanatory text.
 
 For example:
-[75, 12, 34, 2, 1]
+["R01-01::chunk-0003", "R02-01::chunk-0000"]
 
 Ranking:"""
     candidate_ids = [doc["id"] for doc in documents]
@@ -107,7 +108,7 @@ Ranking:"""
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a strict movie search relevance ranker.",
+                        "content": "You are a strict source-passage relevance ranker.",
                     },
                     {"role": "user", "content": prompt},
                 ],
@@ -131,18 +132,18 @@ Ranking:"""
             )
             if (
                 not isinstance(ranked_ids, list)
-                or any(type(doc_id) is not int for doc_id in ranked_ids)
+                or any(type(doc_id) is not str for doc_id in ranked_ids)
             ):
-                raise ValueError("Batch ranking must be a JSON array of integer movie IDs")
+                raise ValueError("Batch ranking must be a JSON array of string chunk IDs")
 
-            seen_ids: set[int] = set()
-            valid_ranked_ids: list[int] = []
+            seen_ids: set[str] = set()
+            valid_ranked_ids: list[str] = []
             for doc_id in ranked_ids:
                 if doc_id in expected_ids and doc_id not in seen_ids:
                     valid_ranked_ids.append(doc_id)
                     seen_ids.add(doc_id)
             if not valid_ranked_ids:
-                raise ValueError("Batch ranking did not contain any candidate movie IDs")
+                raise ValueError("Batch ranking did not contain any candidate chunk IDs")
             valid_ranked_ids.extend(
                 doc_id for doc_id in candidate_ids if doc_id not in seen_ids
             )
@@ -170,7 +171,7 @@ def llm_rerank_cross_encoder(query, documents, limit):
     for doc in documents:
         pairs.append([query, f"{doc.get('title', '')} - {doc.get('document', '')}"])
 
-    cross_encoder = CrossEncoder("cross-encoder/ms-marco-TinyBERT-L2-v2")
+    cross_encoder = CrossEncoder(CROSS_ENCODER_MODEL_NAME)
 
     # `predict` returns a list of numbers, one for each pair
     scores = cross_encoder.predict(pairs)
@@ -188,7 +189,7 @@ def llm_rerank_cross_encoder(query, documents, limit):
 def rerank(
     query: str,
     documents: list[SearchResult],
-    method: Literal["individual", "batch"] = "individual",
+    method: Literal["individual", "batch", "cross_encoder"] = "individual",
     limit: int = 5,
 ) -> list[SearchResult] | list[RerankedSearchResult]:
     match method:

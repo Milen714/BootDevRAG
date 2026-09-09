@@ -1,122 +1,134 @@
-
-import json
-import os
+from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
 
-from .search_utils import SearchResult, CACHE_DIR, CHUNKED_EMBEDDINGS_PATH, DOCUMENT_PREVIEW_LENGTH, JSON_METADATA_PATH, MAX_CHUNK_SIZE, MODEL_NAME, format_search_result
-from .semantic_search import ChunkMetadata, ChunkScore, EmbeddingArray, SemanticSearch, cosine_similarity, semantic_chunk_text
+from .config import (
+    CHUNKED_EMBEDDINGS_PATH,
+    CHUNK_METADATA_PATH,
+    CHUNK_OVERLAP,
+    CHUNK_SIZE,
+    EMBEDDING_BATCH_SIZE,
+    EMBEDDING_MANIFEST_PATH,
+    MODEL_NAME,
+)
+from .io_utils import ensure_directory, read_jsonl, records_hash, write_json, write_jsonl
+from .search_utils import SearchResult, format_search_result, load_chunks
+from .semantic_search import EmbeddingArray, SemanticSearch, normalize_vectors
+
 
 class ChunkedSemanticSearch(SemanticSearch):
-    def __init__(self, model_name: str = MODEL_NAME) -> None:
-        super().__init__(model_name)
+    def __init__(self, model_name: str = MODEL_NAME, model: Any | None = None) -> None:
+        super().__init__(model_name, model=model)
         self.chunk_embeddings: EmbeddingArray | None = None
-        self.chunk_metadata: list[ChunkMetadata] | None = None
+        self.chunks: list[dict[str, Any]] = []
 
-    def _chunk_config(self) -> dict[str, Any]:
-        return {"max_chunk_size": MAX_CHUNK_SIZE, "overlap": 1, "strategy": "sliding_window_skip_overlap_tail", "movie_idx": "document_index"}
+    def _manifest_matches(
+        self, manifest: dict[str, Any], chunks: list[dict[str, Any]], embeddings: EmbeddingArray
+    ) -> bool:
+        return (
+            manifest.get("embedding_model") == self.model_name
+            and manifest.get("chunk_size") == CHUNK_SIZE
+            and manifest.get("chunk_overlap") == CHUNK_OVERLAP
+            and manifest.get("chunk_count") == len(chunks) == len(embeddings)
+            and manifest.get("corpus_hash") == records_hash(chunks)
+            and manifest.get("embedding_shape") == list(embeddings.shape)
+        )
 
-    def build_chunk_embeddings(self, documents: list[dict[str, Any]]) -> EmbeddingArray:
-        if not documents:
-            raise ValueError("Document list cannot be empty.")
-
-        self.documents = documents
-        self.document_map = {doc["id"]: doc for doc in documents}
-
-        all_chunks: list[str] = []
-        metadata_list: list[ChunkMetadata] = []
-
-        for movie_idx, doc in enumerate(documents):
-            if doc["description"]:
-                description_chunks = semantic_chunk_text(doc["description"], max_chunk_size=MAX_CHUNK_SIZE, overlap=1, verbose=False)
-                all_chunks.extend(description_chunks)
-                for idx in range(len(description_chunks)):
-                    metadata_list.append(
-                        ChunkMetadata(movie_idx=movie_idx, chunk_idx=idx, total_chunks=len(description_chunks))
-                    )
-
-        self.chunk_embeddings = self.model.encode(all_chunks, show_progress_bar=True)
-        self.chunk_metadata = metadata_list
-
-        os.makedirs(CACHE_DIR, exist_ok=True)
+    def build_chunk_embeddings(
+        self, chunks: list[dict[str, Any]] | None = None
+    ) -> EmbeddingArray:
+        self.chunks = chunks if chunks is not None else load_chunks()
+        if not self.chunks:
+            raise ValueError("Chunk list cannot be empty.")
+        texts = [str(chunk.get("text") or "") for chunk in self.chunks]
+        embeddings = self.model.encode(
+            texts, batch_size=EMBEDDING_BATCH_SIZE, show_progress_bar=True
+        )
+        self.chunk_embeddings = normalize_vectors(embeddings).astype(np.float32)
+        ensure_directory(CHUNKED_EMBEDDINGS_PATH.parent)
         np.save(CHUNKED_EMBEDDINGS_PATH, self.chunk_embeddings)
-
-        with open(JSON_METADATA_PATH, "w") as f:
-            json.dump({"chunks": self.chunk_metadata, 
-                       "total_chunks": len(all_chunks),
-                       "chunk_config": self._chunk_config()
-                       },
-                        f, indent=2
-                        )
+        write_jsonl(CHUNK_METADATA_PATH, self.chunks)
+        write_json(
+            EMBEDDING_MANIFEST_PATH,
+            {
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "embedding_model": self.model_name,
+                "embedding_shape": list(self.chunk_embeddings.shape),
+                "chunk_count": len(self.chunks),
+                "chunk_size": CHUNK_SIZE,
+                "chunk_overlap": CHUNK_OVERLAP,
+                "corpus_hash": records_hash(self.chunks),
+                "normalized": True,
+            },
+        )
         return self.chunk_embeddings
 
-    def load_or_create_chunk_embeddings(self, documents: list[dict[str, Any]]) -> EmbeddingArray:
-        try:
-            self.documents = documents
-            self.document_map = {doc["id"]: doc for doc in documents}
-            if os.path.exists(CHUNKED_EMBEDDINGS_PATH) and os.path.exists(JSON_METADATA_PATH):
-                self.chunk_embeddings = np.load(CHUNKED_EMBEDDINGS_PATH)
-                with open(JSON_METADATA_PATH, "r") as f:
-                    metadata = json.load(f)
-                    if metadata.get("chunk_config") != self._chunk_config() or metadata.get("total_chunks") != len(self.chunk_embeddings):
-                        print("Chunk embeddings cache is stale. Rebuilding chunk embeddings...")
-                        return self.build_chunk_embeddings(documents)
-                    self.chunk_metadata = metadata.get("chunks", [])
-                    return self.chunk_embeddings
-            print("Chunk embeddings not found in cache. Building chunk embeddings...")
-            return self.build_chunk_embeddings(documents)
-        except Exception as e:
-            print(f"Error loading or creating chunk embeddings: {e}")
-            return np.array([])
+    def load_or_create_chunk_embeddings(
+        self, chunks: list[dict[str, Any]] | None = None
+    ) -> EmbeddingArray:
+        source_chunks = chunks if chunks is not None else load_chunks()
+        if all(
+            path.exists()
+            for path in (CHUNKED_EMBEDDINGS_PATH, CHUNK_METADATA_PATH, EMBEDDING_MANIFEST_PATH)
+        ):
+            try:
+                embeddings = np.load(CHUNKED_EMBEDDINGS_PATH).astype(np.float32)
+                cached_chunks = read_jsonl(CHUNK_METADATA_PATH)
+                import json
+
+                manifest = json.loads(EMBEDDING_MANIFEST_PATH.read_text(encoding="utf-8"))
+                if cached_chunks == source_chunks and self._manifest_matches(
+                    manifest, source_chunks, embeddings
+                ):
+                    self.chunks = source_chunks
+                    self.chunk_embeddings = embeddings
+                    return embeddings
+            except (OSError, ValueError, KeyError):
+                pass
+        return self.build_chunk_embeddings(source_chunks)
 
     def search_chunks(self, query: str, limit: int = 10) -> list[SearchResult]:
-        if self.chunk_embeddings is None or self.chunk_metadata is None:
-            raise ValueError(
-                "No chunk embeddings loaded. Call load_or_create_chunk_embeddings first."
-            )
-
+        if self.chunk_embeddings is None or not self.chunks:
+            raise ValueError("No chunk embeddings loaded.")
+        if limit <= 0:
+            return []
         query_embedding = self.generate_embedding(query)
-
-        chunk_scores: list[ChunkScore] = []
-        for i, chunk_embedding in enumerate(self.chunk_embeddings):
-            similarity = cosine_similarity(query_embedding, chunk_embedding)
-            chunk_scores.append(
-                {
-                    "chunk_idx": self.chunk_metadata[i]["chunk_idx"],
-                    "movie_idx": self.chunk_metadata[i]["movie_idx"],
-                    "score": similarity,
-                }
-            )
-
-        movie_scores: dict[int, float] = {}
-        for chunk_score in chunk_scores:
-            movie_idx = chunk_score["movie_idx"]
-            if (
-                movie_idx not in movie_scores
-                or chunk_score["score"] > movie_scores[movie_idx]
-            ):
-                movie_scores[movie_idx] = chunk_score["score"]
-
-        sorted_movies = sorted(movie_scores.items(), key=lambda x: x[1], reverse=True)
-
-        if self.documents is None:
-            raise ValueError(
-                "No documents loaded. Call load_or_create_chunk_embeddings first."
-            )
+        scores = self.chunk_embeddings @ query_embedding
+        top_indices = np.argsort(scores)[::-1][:limit]
         results: list[SearchResult] = []
-        for movie_idx, score in sorted_movies[:limit]:
-            if movie_idx is None:
-                continue
-            doc = self.documents[movie_idx]
+        for index in top_indices:
+            chunk = self.chunks[int(index)]
             results.append(
                 format_search_result(
-                    doc_id=doc["id"],
-                    title=doc["title"],
-                    document=doc["description"][:DOCUMENT_PREVIEW_LENGTH],
-                    score=score,
+                    doc_id=str(chunk["chunk_id"]),
+                    title=str(chunk.get("title") or ""),
+                    document=str(chunk.get("text") or ""),
+                    score=float(scores[index]),
+                    **chunk_metadata(chunk),
                 )
             )
-
         return results
 
+
+def chunk_metadata(chunk: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "chunk_id": chunk["chunk_id"],
+        "parent_id": chunk["doc_id"],
+        **{
+            key: chunk.get(key)
+            for key in (
+                "chunk_index",
+                "total_chunks",
+                "chunk_word_count",
+                "url",
+                "publisher",
+                "date",
+                "theme",
+                "keywords",
+                "citation",
+                "source_type",
+                "local_path",
+            )
+        },
+    }

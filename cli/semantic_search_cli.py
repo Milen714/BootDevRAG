@@ -1,7 +1,7 @@
 import argparse
 
 from lib.semantic_search import SemanticSearch, chunk_text, embed_query_text, semantic_chunk_text, verify_embeddings, verify_model, embed_text
-from lib.search_utils import DEFAULT_SEARCH_LIMIT, CHUNK_SIZE, CHUNK_OVERLAP, MAX_CHUNK_SIZE, load_movies
+from lib.config import CHUNK_OVERLAP, CHUNK_SIZE, DEFAULT_SEARCH_LIMIT
 from lib.chunked_semantic_search import ChunkedSemanticSearch
 
 def main() -> None:
@@ -33,7 +33,7 @@ def main() -> None:
 
     semantic_chunk_parser = subparsers.add_parser("semantic_chunk", help="Create semantic chunks")
     semantic_chunk_parser.add_argument("text", type=str, help="Text to create semantic chunks for")
-    semantic_chunk_parser.add_argument("--max-chunk-size", type=int, default=MAX_CHUNK_SIZE, help="Size of each semantic chunk")
+    semantic_chunk_parser.add_argument("--max-chunk-size", type=int, default=CHUNK_SIZE, help="Maximum words in each semantic chunk")
     semantic_chunk_parser.add_argument("--overlap", type=int, default=CHUNK_OVERLAP, help="Overlap size between semantic chunks")
 
     embed_chunks_parser = subparsers.add_parser("embed_chunks", help="Generate embeddings for semantic chunks")
@@ -54,17 +54,15 @@ def main() -> None:
             print(f"Generating embedding for query: {args.query}")
             embed_query_text(args.query)
         case "search":
-            model = SemanticSearch()
-            documents = load_movies()
-            model.load_or_create_embeddings(documents)
-            results = model.search(args.query, args.limit)
+            model = ChunkedSemanticSearch()
+            model.load_or_create_chunk_embeddings()
+            results = model.search_chunks(args.query, args.limit)
             for i, res in enumerate(results, 1):
                 print(f"{i}. {res['title']} (score: {res['score']:.4f})")
-                print(f"  {res['description']}\n")
+                print(f"  {res['document']}\n")
         case "search_chunked":
             model = ChunkedSemanticSearch()
-            documents = load_movies()
-            model.load_or_create_chunk_embeddings(documents)
+            model.load_or_create_chunk_embeddings()
             results = model.search_chunks(args.query, args.limit)
             for i, res in enumerate(results, 1):
                 print(f"\n{i}. {res['title']} (score: {res['score']:.4f})")
@@ -78,8 +76,7 @@ def main() -> None:
         case "embed_chunks":
             print("Generating embeddings for semantic chunks...")
             model = ChunkedSemanticSearch()
-            documents = load_movies()
-            embeddings = model.load_or_create_chunk_embeddings(documents)
+            embeddings = model.load_or_create_chunk_embeddings()
             print(f"Generated {len(embeddings)} chunked embeddings")
         case _:
             parser.print_help()

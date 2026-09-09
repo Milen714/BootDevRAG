@@ -1,48 +1,27 @@
-import json
-import os
 import string
 from typing import Any, TypedDict
 from nltk.stem import PorterStemmer
 
+from .config import CHUNKS_PATH, SCORE_PRECISION, STOPWORDS_PATH
+from .io_utils import read_jsonl
+
 class SearchResult(TypedDict):
-    id: int
+    id: str
     title: str
     document: str
     score: float
     metadata: dict[str, Any]    
 
-MODEL_NAME = "all-MiniLM-L6-v2"
-DEFAULT_SEARCH_LIMIT = 5
-SCORE_PRECISION = 4
-DOCUMENT_PREVIEW_LENGTH = 100
-DEFAULT_ALPHA = 0.5
-K_VALUE = 60
-
-SEARCH_LIMIT_MULTIPLIER = int(5)
-
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-DATA_PATH = os.path.join(PROJECT_ROOT, "data", "movies.json")
-STOPWORDS_PATH = os.path.join(PROJECT_ROOT, "data", "stopwords.txt")
-CACHE_DIR = os.path.join(PROJECT_ROOT, "cache")
-EMBEDDINGS_PATH = os.path.join(CACHE_DIR, "movie_embeddings.npy")
-CHUNKED_EMBEDDINGS_PATH = os.path.join(CACHE_DIR, "chunk_embeddings.npy")
-JSON_METADATA_PATH = os.path.join(CACHE_DIR, "chunk_metadata.json")
-
-CHUNK_SIZE = 200
-CHUNK_OVERLAP = 0
-MAX_CHUNK_SIZE = 4
-
-BM25_K1 = 1.5
-BM25_B = 0.75
-
-def load_movies() -> list[dict]:
-    with open(DATA_PATH, "r") as f:
-        data = json.load(f)
-    return data["movies"]
+def load_chunks() -> list[dict[str, Any]]:
+    if not CHUNKS_PATH.exists():
+        raise FileNotFoundError(
+            f"Chunk dataset not found at {CHUNKS_PATH}. Run the build command first."
+        )
+    return read_jsonl(CHUNKS_PATH)
 
 
 def format_search_result(
-    doc_id: int, title: str, document: str, score: float, **metadata: Any
+    doc_id: str, title: str, document: str, score: float, **metadata: Any
 ) -> SearchResult:
     """Create standardized search result
 
@@ -74,7 +53,7 @@ def preprocess_text(text: str) -> str:
 def load_stopwords() -> list[str]:
 
     words: list[str] = []
-    with open(STOPWORDS_PATH, "r") as file:
+    with STOPWORDS_PATH.open("r", encoding="utf-8") as file:
         for line in file:
             word: str = line.strip()
             if word:
