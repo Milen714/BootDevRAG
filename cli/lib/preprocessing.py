@@ -1,4 +1,6 @@
 import re
+from functools import lru_cache
+import json
 import unicodedata
 from pathlib import Path
 from typing import Any
@@ -7,18 +9,22 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 from pypdf import PdfReader
+from transformers import AutoTokenizer
 
 from .config import (
+    CHUNKING_STRATEGY_VERSION,
+    CHUNK_MANIFEST_PATH,
+    CHUNK_MAX_TOKENS,
+    CHUNK_OVERLAP_TOKENS,
     CHUNKS_PATH,
-    CHUNK_OVERLAP,
-    CHUNK_SIZE,
     MIN_USEFUL_TEXT_CHARS,
     PROCESSED_DOCUMENTS_PATH,
     PROJECT_ROOT,
     REQUEST_TIMEOUT_SECONDS,
+    TOKENIZER_NAME,
     USER_AGENT,
 )
-from .io_utils import project_relative, write_jsonl
+from .io_utils import project_relative, records_hash, write_json, write_jsonl
 
 
 def clean_text(text: str) -> str:
@@ -129,28 +135,90 @@ def split_sentences(text: str) -> list[str]:
     return [part.strip() for part in re.split(r"(?<=[.!?])\s+", (text or "").strip()) if part.strip()]
 
 
-def chunk_sentences(sentences: list[str], chunk_size: int, overlap: int) -> list[str]:
+@lru_cache(maxsize=4)
+def get_tokenizer(tokenizer_name: str = TOKENIZER_NAME) -> Any:
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, use_fast=True)
+    # Extraction text is counted before it is split, so counting must not warn or truncate.
+    tokenizer.model_max_length = 10**9
+    return tokenizer
+
+
+def token_count(text: str, tokenizer: Any | None = None) -> int:
+    active_tokenizer = tokenizer or get_tokenizer()
+    return len(active_tokenizer.encode(text, add_special_tokens=False))
+
+
+def split_token_windows(
+    text: str, max_tokens: int, overlap_tokens: int, tokenizer: Any
+) -> list[str]:
+    encoded = tokenizer(
+        text, add_special_tokens=False, return_offsets_mapping=True
+    )
+    offsets = encoded["offset_mapping"]
+    if len(offsets) <= max_tokens:
+        return [text.strip()] if text.strip() else []
+    windows: list[str] = []
+    start = 0
+    while start < len(offsets):
+        end = min(start + max_tokens, len(offsets))
+        char_start = offsets[start][0]
+        char_end = offsets[end - 1][1]
+        window = text[char_start:char_end].strip()
+        if window:
+            windows.append(window)
+        if end == len(offsets):
+            break
+        start = end - overlap_tokens
+    return windows
+
+
+def chunk_sentences(
+    sentences: list[str],
+    chunk_size: int = CHUNK_MAX_TOKENS,
+    overlap: int = CHUNK_OVERLAP_TOKENS,
+    tokenizer: Any | None = None,
+) -> list[str]:
     if chunk_size < 1 or overlap < 0 or overlap >= chunk_size:
-        raise ValueError("chunk_size must be positive and overlap must be between 0 and chunk_size")
-    sentence_words = [split_words(sentence) for sentence in sentences]
+        raise ValueError(
+            "chunk_size must be positive and overlap must be between 0 and chunk_size"
+        )
+    active_tokenizer = tokenizer or get_tokenizer()
+    units: list[tuple[str, int]] = []
+    for sentence in sentences:
+        for part in split_token_windows(
+            sentence, chunk_size, overlap, active_tokenizer
+        ):
+            units.append((part, token_count(part, active_tokenizer)))
+
     chunks: list[str] = []
     start = 0
-    while start < len(sentence_words):
-        words: list[str] = []
+    while start < len(units):
+        parts: list[str] = []
+        used_tokens = 0
         end = start
-        while end < len(sentence_words):
-            candidate = words + sentence_words[end]
-            if words and len(candidate) > chunk_size:
+        while end < len(units):
+            unit_text, unit_tokens = units[end]
+            if parts and used_tokens + unit_tokens > chunk_size:
                 break
-            words = candidate
+            parts.append(unit_text)
+            used_tokens += unit_tokens
             end += 1
-        if words:
-            chunks.append(" ".join(words))
-        overlap_words = 0
+        if parts:
+            chunk = " ".join(parts)
+            actual_tokens = token_count(chunk, active_tokenizer)
+            if actual_tokens > chunk_size:
+                chunks.extend(
+                    split_token_windows(
+                        chunk, chunk_size, overlap, active_tokenizer
+                    )
+                )
+            else:
+                chunks.append(chunk)
+        overlap_count = 0
         next_start = end
         for index in range(end - 1, start, -1):
-            overlap_words += len(sentence_words[index])
-            if overlap_words >= overlap:
+            overlap_count += units[index][1]
+            if overlap_count >= overlap:
                 next_start = index
                 break
         start = max(start + 1, next_start)
@@ -158,11 +226,20 @@ def chunk_sentences(sentences: list[str], chunk_size: int, overlap: int) -> list
 
 
 def create_chunks_for_document(
-    document: dict[str, Any], chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP
+    document: dict[str, Any],
+    chunk_size: int = CHUNK_MAX_TOKENS,
+    overlap: int = CHUNK_OVERLAP_TOKENS,
+    tokenizer: Any | None = None,
 ) -> list[dict[str, Any]]:
     if document.get("extraction_status") != "extracted":
         return []
-    texts = chunk_sentences(split_sentences(str(document.get("text") or "")), chunk_size, overlap)
+    active_tokenizer = tokenizer or get_tokenizer()
+    texts = chunk_sentences(
+        split_sentences(str(document.get("text") or "")),
+        chunk_size,
+        overlap,
+        active_tokenizer,
+    )
     chunks: list[dict[str, Any]] = []
     for index, text in enumerate(texts):
         chunks.append(
@@ -174,6 +251,7 @@ def create_chunks_for_document(
                 "chunk_index": index,
                 "total_chunks": len(texts),
                 "chunk_word_count": len(split_words(text)),
+                "chunk_token_count": token_count(text, active_tokenizer),
                 **{
                     key: document.get(key, "")
                     for key in ("url", "publisher", "date", "theme", "keywords", "citation", "source_type", "local_path")
@@ -184,6 +262,49 @@ def create_chunks_for_document(
 
 
 def chunk_documents(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    chunks = [chunk for document in documents for chunk in create_chunks_for_document(document)]
+    tokenizer = get_tokenizer()
+    chunks = [
+        chunk
+        for document in documents
+        for chunk in create_chunks_for_document(document, tokenizer=tokenizer)
+    ]
     write_jsonl(CHUNKS_PATH, chunks)
+    token_counts = [int(chunk["chunk_token_count"]) for chunk in chunks]
+    sorted_counts = sorted(token_counts)
+    write_json(
+        CHUNK_MANIFEST_PATH,
+        {
+            "tokenizer": TOKENIZER_NAME,
+            "chunking_strategy": CHUNKING_STRATEGY_VERSION,
+            "chunk_max_tokens": CHUNK_MAX_TOKENS,
+            "chunk_overlap_tokens": CHUNK_OVERLAP_TOKENS,
+            "source_documents_hash": records_hash(documents),
+            "document_count": len(documents),
+            "chunk_count": len(chunks),
+            "token_stats": {
+                "minimum": min(token_counts, default=0),
+                "average": round(sum(token_counts) / len(token_counts), 2) if token_counts else 0,
+                "median": sorted_counts[len(sorted_counts) // 2] if sorted_counts else 0,
+                "p95": sorted_counts[int((len(sorted_counts) - 1) * 0.95)] if sorted_counts else 0,
+                "maximum": max(token_counts, default=0),
+                "over_limit": sum(count > CHUNK_MAX_TOKENS for count in token_counts),
+            },
+        },
+    )
     return chunks
+
+
+def chunk_cache_is_valid(documents: list[dict[str, Any]]) -> bool:
+    if not CHUNKS_PATH.exists() or not CHUNK_MANIFEST_PATH.exists():
+        return False
+    try:
+        manifest = json.loads(CHUNK_MANIFEST_PATH.read_text(encoding="utf-8"))
+        return (
+            manifest.get("tokenizer") == TOKENIZER_NAME
+            and manifest.get("chunking_strategy") == CHUNKING_STRATEGY_VERSION
+            and manifest.get("chunk_max_tokens") == CHUNK_MAX_TOKENS
+            and manifest.get("chunk_overlap_tokens") == CHUNK_OVERLAP_TOKENS
+            and manifest.get("source_documents_hash") == records_hash(documents)
+        )
+    except (OSError, ValueError):
+        return False

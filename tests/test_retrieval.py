@@ -1,12 +1,14 @@
 import numpy as np
 
-from lib.chunked_semantic_search import ChunkedSemanticSearch
+from lib.chunked_semantic_search import ChunkedSemanticSearch, format_embedding_input
+from lib.config import EMBEDDING_SAFETY_MARGIN_TOKENS, MODEL_MAX_SEQUENCE_TOKENS
 from lib.hybrid_search import (
     limit_chunks_per_parent,
     rrf_combine_search_results,
 )
 from lib.inverted_index import InvertedIndex
 from lib.search_utils import format_search_result
+from lib.preprocessing import get_tokenizer
 
 
 def chunk(chunk_id: str, parent_id: str, text: str) -> dict:
@@ -110,3 +112,27 @@ def test_semantic_search_returns_only_chunk_text_and_parent_metadata() -> None:
     assert results[0]["id"] == "A::chunk-0000"
     assert results[0]["document"] == "matching evidence"
     assert results[0]["metadata"]["parent_id"] == "A"
+
+
+def test_title_text_embedding_input_fits_model_limit() -> None:
+    tokenizer = get_tokenizer()
+    item = chunk(
+        "A::chunk-0000",
+        "A",
+        " ".join("evidence" for _ in range(200)),
+    )
+    item["title"] = " ".join("descriptive" for _ in range(100))
+
+    embedding_input = format_embedding_input(item, "title_text", tokenizer)
+    input_tokens = len(tokenizer.encode(embedding_input, add_special_tokens=True))
+
+    assert input_tokens <= MODEL_MAX_SEQUENCE_TOKENS - EMBEDDING_SAFETY_MARGIN_TOKENS
+    assert embedding_input.endswith(item["text"])
+
+
+def test_embedding_input_mode_is_interchangeable() -> None:
+    tokenizer = get_tokenizer()
+    item = chunk("A::chunk-0000", "A", "matching evidence")
+
+    assert format_embedding_input(item, "text", tokenizer) == "matching evidence"
+    assert format_embedding_input(item, "title_text", tokenizer).startswith("Title: Source A")

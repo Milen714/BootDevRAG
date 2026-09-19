@@ -7,6 +7,7 @@ from .config import (
     K_VALUE,
     MAX_CHUNKS_PER_PARENT,
     MIN_RETRIEVAL_CANDIDATES,
+    RERANK_CANDIDATE_MULTIPLIER,
     SEARCH_LIMIT_MULTIPLIER,
 )
 from .inverted_index import InvertedIndex
@@ -54,7 +55,11 @@ class HybridSearch:
         return limit_chunks_per_parent(combined, limit)
 
     def rrf_search(
-        self, query: str, k: int = K_VALUE, limit: int = DEFAULT_SEARCH_LIMIT
+        self,
+        query: str,
+        k: int = K_VALUE,
+        limit: int = DEFAULT_SEARCH_LIMIT,
+        max_per_parent: int | None = MAX_CHUNKS_PER_PARENT,
     ) -> list[SearchResult]:
         candidate_limit = max(MIN_RETRIEVAL_CANDIDATES, limit * SEARCH_LIMIT_MULTIPLIER)
         combined = rrf_combine_search_results(
@@ -62,7 +67,9 @@ class HybridSearch:
             self.semantic_search.search_chunks(query, candidate_limit),
             k,
         )
-        return limit_chunks_per_parent(combined, limit)
+        if max_per_parent is None:
+            return combined[:limit]
+        return limit_chunks_per_parent(combined, limit, max_per_parent)
 
 
 def hybrid_score(bm25_score: float, semantic_score: float, alpha: float) -> float:
@@ -194,9 +201,14 @@ def rrf_search_command(
 
         enhanced_query = enhance_query(query, enhance)
         query = enhanced_query
-    candidate_limit = limit * SEARCH_LIMIT_MULTIPLIER if rerank_method else limit
+    candidate_limit = limit * RERANK_CANDIDATE_MULTIPLIER if rerank_method else limit
     print(f"Retrieving up to {candidate_limit} candidates for RRF search...")
-    results = HybridSearch().rrf_search(query, k, candidate_limit)
+    results = HybridSearch().rrf_search(
+        query,
+        k,
+        candidate_limit,
+        max_per_parent=None if rerank_method else MAX_CHUNKS_PER_PARENT,
+    )
     if rerank_method:
         from .rerank import rerank
 

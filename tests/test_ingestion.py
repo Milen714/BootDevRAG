@@ -7,6 +7,8 @@ from lib.preprocessing import (
     chunk_sentences,
     create_chunks_for_document,
     extract_html_text,
+    get_tokenizer,
+    token_count,
 )
 
 
@@ -109,3 +111,14 @@ def test_sentence_chunks_overlap_and_keep_parent_metadata() -> None:
     assert chunks[0]["url"] == document["url"]
     assert chunks[0]["text"] != document["text"]
     assert set(texts[0].split()) & set(texts[1].split())
+
+
+def test_long_sentence_is_split_into_token_safe_chunks() -> None:
+    tokenizer = get_tokenizer()
+    text = " ".join(f"policy{index}" for index in range(1000))
+
+    chunks = chunk_sentences([text], chunk_size=200, overlap=40, tokenizer=tokenizer)
+
+    assert len(chunks) > 1
+    assert all(0 < token_count(chunk, tokenizer) <= 200 for chunk in chunks)
+    assert chunks[0] != chunks[1]

@@ -1,7 +1,7 @@
 import argparse
 
 from lib.semantic_search import SemanticSearch, chunk_text, embed_query_text, semantic_chunk_text, verify_embeddings, verify_model, embed_text
-from lib.config import CHUNK_OVERLAP, CHUNK_SIZE, DEFAULT_SEARCH_LIMIT
+from lib.config import CHUNK_MAX_TOKENS, CHUNK_OVERLAP_TOKENS, DEFAULT_SEARCH_LIMIT
 from lib.chunked_semantic_search import ChunkedSemanticSearch
 
 def main() -> None:
@@ -28,13 +28,13 @@ def main() -> None:
 
     chunk_parser = subparsers.add_parser("chunk", help="Create chunks")
     chunk_parser.add_argument("text", type=str, help="Text to create chunks for")
-    chunk_parser.add_argument("--chunk-size", type=int, default=CHUNK_SIZE, help="Size of each chunk")
-    chunk_parser.add_argument("--overlap", type=int, default=CHUNK_OVERLAP, help="Overlap size between chunks")
+    chunk_parser.add_argument("--chunk-size", type=int, default=CHUNK_MAX_TOKENS, help="Maximum tokens in each chunk")
+    chunk_parser.add_argument("--overlap", type=int, default=CHUNK_OVERLAP_TOKENS, help="Approximate overlap in tokens")
 
     semantic_chunk_parser = subparsers.add_parser("semantic_chunk", help="Create semantic chunks")
     semantic_chunk_parser.add_argument("text", type=str, help="Text to create semantic chunks for")
-    semantic_chunk_parser.add_argument("--max-chunk-size", type=int, default=CHUNK_SIZE, help="Maximum words in each semantic chunk")
-    semantic_chunk_parser.add_argument("--overlap", type=int, default=CHUNK_OVERLAP, help="Overlap size between semantic chunks")
+    semantic_chunk_parser.add_argument("--max-chunk-size", type=int, default=CHUNK_MAX_TOKENS, help="Maximum tokens in each semantic chunk")
+    semantic_chunk_parser.add_argument("--overlap", type=int, default=CHUNK_OVERLAP_TOKENS, help="Approximate overlap in tokens")
 
     embed_chunks_parser = subparsers.add_parser("embed_chunks", help="Generate embeddings for semantic chunks")
 

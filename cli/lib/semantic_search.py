@@ -4,7 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 from sentence_transformers import SentenceTransformer
 
-from .config import CHUNK_OVERLAP, CHUNK_SIZE, MODEL_NAME
+from .config import CHUNK_MAX_TOKENS, CHUNK_OVERLAP_TOKENS, MODEL_NAME
 from .preprocessing import chunk_sentences, split_sentences
 
 
@@ -40,28 +40,19 @@ class SemanticSearch:
 
 
 def chunk_text(
-    text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP
+    text: str,
+    chunk_size: int = CHUNK_MAX_TOKENS,
+    overlap: int = CHUNK_OVERLAP_TOKENS,
 ) -> list[str]:
     if not text.strip():
         raise ValueError("Input text cannot be empty.")
-    words = text.split()
-    if chunk_size < 1 or overlap < 0 or overlap >= chunk_size:
-        raise ValueError("chunk_size must be positive and overlap must be smaller")
-    chunks: list[str] = []
-    step = chunk_size - overlap
-    for start in range(0, len(words), step):
-        chunk = " ".join(words[start : start + chunk_size])
-        if chunk:
-            chunks.append(chunk)
-        if start + chunk_size >= len(words):
-            break
-    return chunks
+    return chunk_sentences(split_sentences(text), chunk_size, overlap)
 
 
 def semantic_chunk_text(
     text: str,
-    max_chunk_size: int = CHUNK_SIZE,
-    overlap: int = CHUNK_OVERLAP,
+    max_chunk_size: int = CHUNK_MAX_TOKENS,
+    overlap: int = CHUNK_OVERLAP_TOKENS,
     verbose: bool = False,
 ) -> list[str]:
     del verbose

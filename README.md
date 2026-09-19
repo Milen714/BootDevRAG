@@ -28,6 +28,12 @@ Force downloading, extraction, chunking, and indexing again:
 uv run python cli/build_index_cli.py --rebuild
 ```
 
+Regenerate token-safe chunks and indexes without downloading sources again:
+
+```bash
+uv run python cli/build_index_cli.py --rechunk
+```
+
 Use `--limit N` for a smaller ingestion run. Generated parent documents and
 chunks are stored under `data/processed/`; BM25 and embedding artifacts are
 stored under `cache/`. Both indexes include corpus hashes and are rebuilt when
@@ -45,6 +51,12 @@ Results contain only relevant chunks. Each result has a stable string
 `chunk_id`, a `parent_id`, chunk position, URL, publisher, date, theme,
 keywords, citation, and retrieval ranks. At most two final chunks are returned
 from one parent document.
+
+The current MiniLM benchmark uses 200-token chunks, approximately 40 tokens of
+overlap, and title-plus-chunk embedding inputs. The title is capped and every
+final input is validated against MiniLM's 256-token context before encoding.
+These settings and the embedding input mode are interchangeable constants in
+`cli/lib/config.py`; changing them invalidates the appropriate caches.
 
 ### Tests
 

@@ -14,8 +14,9 @@ from .config import (
     BM25_K1,
     BM25_MANIFEST_PATH,
     BM25_TERM_FREQUENCIES_PATH,
-    CHUNK_OVERLAP,
-    CHUNK_SIZE,
+    CHUNKING_STRATEGY_VERSION,
+    CHUNK_MAX_TOKENS,
+    CHUNK_OVERLAP_TOKENS,
     DEFAULT_SEARCH_LIMIT,
 )
 from .io_utils import ensure_directory, records_hash, write_json
@@ -71,8 +72,9 @@ class InvertedIndex:
             {
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "chunk_count": len(chunks),
-                "chunk_size": CHUNK_SIZE,
-                "chunk_overlap": CHUNK_OVERLAP,
+                "chunking_strategy": CHUNKING_STRATEGY_VERSION,
+                "chunk_max_tokens": CHUNK_MAX_TOKENS,
+                "chunk_overlap_tokens": CHUNK_OVERLAP_TOKENS,
                 "corpus_hash": records_hash(chunks),
                 "searchable_fields": ["title", "theme", "keywords", "text"],
             },
@@ -92,8 +94,9 @@ class InvertedIndex:
             manifest = json.loads(BM25_MANIFEST_PATH.read_text(encoding="utf-8"))
             return (
                 manifest.get("chunk_count") == len(chunks)
-                and manifest.get("chunk_size") == CHUNK_SIZE
-                and manifest.get("chunk_overlap") == CHUNK_OVERLAP
+                and manifest.get("chunking_strategy") == CHUNKING_STRATEGY_VERSION
+                and manifest.get("chunk_max_tokens") == CHUNK_MAX_TOKENS
+                and manifest.get("chunk_overlap_tokens") == CHUNK_OVERLAP_TOKENS
                 and manifest.get("corpus_hash") == records_hash(chunks)
             )
         except (OSError, ValueError):
